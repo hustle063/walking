@@ -4,10 +4,11 @@ from utils.dataloader import NpzLoader
 from utils.quaternion import forward_kinematics
 from utils.visualization import render_animation
 from tqdm import tqdm
+import numpy as np
 
 if __name__ == '__main__':
     model = torch.load('trained_model/checkpoint.t7')
-    file = 'cmu_test.npz'
+    file = 'cmu_test_30fps.npz'
     npzloader = NpzLoader(file, visualize=False)
     data = DataLoader(npzloader, batch_size=2, shuffle=True)
 
@@ -22,11 +23,11 @@ if __name__ == '__main__':
         pos_pred = forward_kinematics(local_q.reshape(local_q.shape[0], local_q.shape[1], -1, 4),
                                       root_pos, npzloader.data['rig'], npzloader.data['edges'])
 
-        pos_pred = pos_pred.view(pos_pred.shape[0], pos_pred.shape[1], -1)
+        pos_pred = pos_pred.view(pos_pred.shape[0], pos_pred.shape[1], -1, 3)
 
         pos_pred = pos_pred.cpu().detach().numpy()
         for i in range(pos_pred.shape[0]):
             sample = {'trajectory': pos_pred[i], 'edges': npzloader.data['edges']}
-            filename = 'video/walk{}_{}.mp4'.format(i_batch, i)
-            render_animation(sample, filename)
+            filename = 'walking_result/walk{}_{}.mp4'.format(i_batch, i)
+            render_animation(sample, filename, fps=30)
 

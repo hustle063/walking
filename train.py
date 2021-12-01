@@ -2,30 +2,33 @@ from utils.dataloader import NpzLoader
 from utils.quaternion import normalize_quaternion, geodesic_loss, forward_kinematics
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from models.network import StateEncoder, LSTM, Decoder
+from models.network import StateEncoder, LSTM, Decoder, GRUModel
 from tqdm import tqdm
 import torch
+import torch.nn as nn
 import torch.optim as optim
 
 # TODO remove rotation 1， 6， 17， 24
 if __name__ == '__main__':
-    file = 'cmu_train.npz'
+    file = 'edin_train.npz'
     npzloader = NpzLoader(file, visualize=False)
     data = DataLoader(npzloader, batch_size=32, shuffle=True)
     print('load complete')
-    state_encoder = StateEncoder(in_dim=129)
+    state_encoder = StateEncoder(in_dim=127)
     state_encoder = state_encoder.cuda()
-    lstm = LSTM(in_dim=256)
-    lstm = lstm.cuda()
-    decoder = Decoder(in_dim=768, out_dim=129)
+    # lstm = LSTM(in_dim=256)
+    # lstm = lstm.cuda()
+    gru = GRUModel(256)
+    gru = gru.cuda()
+    decoder = Decoder(in_dim=1000, out_dim=127)
     decoder = decoder.cuda()
-    optimizer_g = optim.Adam(lr=0.0001, params=list(state_encoder.parameters()) + list(lstm.parameters()),
-                             betas=(0.5, 0.9), weight_decay=0.00001)
+    optimizer_g = optim.Adam(lr=0.0001, params=list(state_encoder.parameters()) + list(gru.parameters()) + list(decoder.parameters()),
+                             betas=(0.5, 0.9), weight_decay=0.0001)
     writer = SummaryWriter('log')
 
-    for epoch in range(50):
+    for epoch in range(150):
         state_encoder.train()
-        lstm.train()
+        gru.train()
         decoder.train()
         rig_pred = {}
         for i_batch, sampled_batch in tqdm(enumerate(data)):
@@ -33,37 +36,50 @@ if __name__ == '__main__':
             loss_q = 0
             loss_contact = 0
             loss_root = 0
+            loss_pos = 0
             local_q = sampled_batch['local_q'].cuda()
             root_v = sampled_batch['root_v'].cuda()
             contact = sampled_batch['contact'].cuda()
             worldpos = sampled_batch['worldpos'].cuda()
 
-            lstm.init_hidden(local_q.size(0))
+            # lstm.init_hidden(local_q.size(0))
 
             batch_size = local_q.size()[0]
             std = torch.std(worldpos, axis=(0, 1), keepdim=True)
 
+            if epoch < 50:
+                stage = 4
+            # elif epoch < 100:
+            #     stage = 4
+            # elif epoch < 100:
+            #     stage = 20
+            else:
+                stage = 20
+
+            optimizer_g.zero_grad()
             for t in range(239):  # window length
                 if t == 0:
+                    hidden = None
                     local_q_t = local_q[:, t]
-                    contact_t = contact[:, t]
+                    # contact_t = contact[:, t]
                     root_v_t = root_v[:, t]
                     root_pos_pred = worldpos[:, t, 0:3] + root_v_t
-                elif t % 8 < 4:
+                elif t % stage < stage/2:
                     local_q_t = local_q[:, t]
-                    contact_t = contact[:, t]
+                    # contact_t = contact[:, t]
                     root_v_t = root_v[:, t]
                     root_pos_pred = worldpos[:, t, 0:3] + root_v_t
                 else:
                     local_q_t = local_q_pred.reshape(batch_size, -1)
-                    contact_t = contact_pred[0]
+                    # contact_t = contact_pred[0]
                     root_v_t = root_v_pred[0]
                     root_pos_pred += root_v_t
-                state_input = torch.cat([local_q_t, root_v_t, contact_t], -1).unsqueeze(0)
+                state_input = torch.cat([local_q_t, root_v_t], -1).unsqueeze(0)
 
                 h_state = state_encoder(state_input)
-                h_out = lstm(h_state)
-                h_pred, contact_pred = decoder(h_out)
+                h_out, hidden = gru(h_state, hidden)
+                h_pred = decoder(h_out)
+                # h_pred, contact_pred = decoder(h_out)
 
                 local_q_v_pred = h_pred[:, :, :124]
                 root_v_pred = h_pred[:, :, 124:128]
@@ -75,11 +91,11 @@ if __name__ == '__main__':
                 local_q_pred = normalize_quaternion(local_q_pred[0].reshape(batch_size, -1, 4))
                 loss_q += geodesic_loss(local_q_pred, local_q_next)
                 root_v_next = root_v[:, t + 1]
-                loss_root += torch.mean(torch.abs(root_v_next - root_v_pred[0]))
-                contact_next = contact[:, t + 1]
-                threshold = torch.tensor([0.5], device='cuda')
-                results = (contact_pred[0] > threshold).float() * 1
-                loss_contact += torch.mean(torch.abs(results - contact_next))
+                loss_root += torch.sum(torch.mean(torch.abs(root_v_next - root_v_pred[0]), dim=0))
+                # contact_next = contact[:, t + 1]
+                # threshold = torch.tensor([0.5], device='cuda')
+                # results = (contact_pred[0] > threshold).float() * 1
+                # loss_contact += torch.mean(torch.abs(contact_pred[0] - contact_next))
 
                 rig_pred[i_batch]['q'].append(local_q_pred)
                 rig_pred[i_batch]['root_pos'].append(root_pos_pred.detach().clone())
@@ -89,26 +105,26 @@ if __name__ == '__main__':
                                           npzloader.data['rig'], npzloader.data['edges'])
 
             pos_pred = pos_pred.view(pos_pred.shape[0], pos_pred.shape[1], -1)
+            loss_pos = torch.mean(torch.abs(pos_pred - worldpos[:, 1:, :]))
+            # loss_pos = torch.nn.functional.mse_loss(pos_pred, worldpos[:, 1:, :])
 
-            loss_pos = torch.mean(torch.abs(pos_pred - worldpos[:, 1:, :]) / std)
-
-            loss_total = 1.0*loss_q + 1.0*loss_pos + 0.2*loss_root + 0.1*loss_contact
+            loss_total = 1.0*loss_q + 1.0*loss_pos + loss_root/240
             loss_total.backward()
             optimizer_g.step()
 
             writer.add_scalar('loss_quat', loss_q.item(), global_step=epoch * len(data) + i_batch)
             writer.add_scalar('loss_position', loss_pos.item(), global_step=epoch * len(data) + i_batch)
             writer.add_scalar('loss_root', loss_root.item(), global_step=epoch * len(data) + i_batch)
-            writer.add_scalar('loss_contact', loss_contact.item(), global_step=epoch * len(data) + i_batch)
+            # writer.add_scalar('loss_contact', loss_contact.item(), global_step=epoch * len(data) + i_batch)
             writer.add_scalar('loss_total', loss_total.item(), global_step=epoch * len(data) + i_batch)
 
         state = {
             'epoch': epoch,
             'state_encoder': state_encoder.state_dict(),
-            'lstm': lstm.state_dict(),
+            'gru': gru.state_dict(),
             'decoder': decoder.state_dict(),
             'optimize': optimizer_g.state_dict()
         }
-        torch.save(state, 'trained_model/checkpoint4.t7')
+        torch.save(state, 'trained_model/checkpoint10.t7')
 
 

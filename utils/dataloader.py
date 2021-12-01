@@ -29,7 +29,7 @@ class NpzLoader(Dataset):
     def _find_root_velocity(self, rootpos):
         temppos = rootpos[:-1]
         temppos = np.insert(temppos, 0, rootpos[0], 0)
-        root_velocity = temppos - rootpos
+        root_velocity = rootpos - temppos
         # root_velocity = np.linalg.norm(temppos, axis=1)
         return root_velocity
 
@@ -97,7 +97,7 @@ class NpzLoader(Dataset):
                 Q.append(np.reshape(rotations[start_frame:end_frame, :, :], (window, -1)))
                 actions.append(action)
                 styles.append(style)
-                root_v.append(root_velocity[start_frame-1:end_frame-1])
+                root_v.append(root_velocity[start_frame:end_frame])
                 contact_state.append(contact[start_frame-1:end_frame-1, :])
                 start_frame = end_frame + offset
                 end_frame = start_frame + window

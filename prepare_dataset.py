@@ -7,7 +7,7 @@ from utils.bvh import BvhReader, process_bvhkeyframe, data_store
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     rigs = []
-    for file in glob.glob("/Users/h1y1c/Desktop/walking/dataset/CMU/walking/*.bvh", recursive=True):
+    for file in glob.glob("/Users/h1y1c/Desktop/walking/dataset/edin_locomotion/*.bvh", recursive=True):
         my_bvh = BvhReader(file)
         rig = my_bvh.read()
         for i in range(rig.frames):
@@ -15,5 +15,5 @@ if __name__ == '__main__':
         rig.worldpos.default_factory = None  # freeze rig.worldpos
         rig.quaternion.default_factory = None  # freeze rig.quaternion
         rigs.append(rig)
-    data_store(rigs, filename='cmu_train.npz')
+    data_store(rigs, filename='edin_train.npz')
 

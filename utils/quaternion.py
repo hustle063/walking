@@ -212,13 +212,15 @@ def normalize_quaternion(q):
 
 
 def geodesic_loss(q1, q2):
-    THRESHOLD = torch.tensor(0.0001, dtype=torch.float, device=torch.device('cuda:0'))
+    # THRESHOLD = torch.tensor(0.0001, dtype=torch.float, device=torch.device('cuda:0'))
     assert q1.shape[-1] == 4
     length = q1.shape[1]
     distance = torch.mul(q1, q2).sum(-1)
-    distance = torch.where(distance > THRESHOLD, distance, THRESHOLD)
-    loss = torch.mean(torch.log(distance).sum(1)) / length
-    return torch.neg(loss)
+    loss = torch.mean((1 - distance).sum(1)) / length
+    # distance = torch.where(distance > THRESHOLD, distance, THRESHOLD)
+    # loss = torch.mean(torch.log(distance).sum(1)) / length
+    # return torch.neg(loss)
+    return loss
 
 
 def forward_kinematics(rotations, root_positions, root, edges):
