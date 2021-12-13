@@ -7,12 +7,14 @@ from tqdm import tqdm
 import numpy as np
 
 if __name__ == '__main__':
-    model = torch.load('trained_model/checkpoint.t7')
-    file = 'cmu_test_30fps.npz'
+    model = torch.load('trained_model/checkpoint10.t7')
+    file = 'edin_test_less.npz'
     npzloader = NpzLoader(file, visualize=False)
     data = DataLoader(npzloader, batch_size=2, shuffle=True)
 
     for i_batch, sampled_batch in tqdm(enumerate(data)):
+        if i_batch >= 6:
+            break
         local_q = sampled_batch['local_q'].cuda()
         root_v = sampled_batch['root_v'].cuda()
         worldpos = sampled_batch['worldpos'].cuda()
@@ -29,5 +31,5 @@ if __name__ == '__main__':
         for i in range(pos_pred.shape[0]):
             sample = {'trajectory': pos_pred[i], 'edges': npzloader.data['edges']}
             filename = 'walking_result/walk{}_{}.mp4'.format(i_batch, i)
-            render_animation(sample, filename, fps=30)
+            render_animation(sample, filename, fps=120)
 

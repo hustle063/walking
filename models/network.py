@@ -21,6 +21,24 @@ class StateEncoder(nn.Module):
         return x
 
 
+class ControlEncoder(nn.Module):
+    def __init__(self, in_dim=7, hidden_dim=128, out_dim=64):
+        super(ControlEncoder, self).__init__()
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim
+
+        self.fc0 = nn.Linear(in_dim, hidden_dim, bias=True)
+        self.fc1 = nn.Linear(hidden_dim, out_dim, bias=True)
+
+    def forward(self, x):
+        x = self.fc0(x)
+        x = nn.functional.relu(x)
+        x = self.fc1(x)
+        x = nn.functional.relu(x)
+        return x
+
+
 class LSTM(nn.Module):
     def __init__(self, in_dim=128, hidden_dim=1024, num_layer=3):
         super(LSTM, self).__init__()

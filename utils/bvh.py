@@ -212,6 +212,7 @@ class BvhReader(object):
         a = s.split()
         self._token_list = a
 
+
 #######################################
 # NON-CLASS FUNCTIONS START HERE
 #######################################
@@ -223,7 +224,7 @@ def process_bvhkeyframe(worldpos, quaternion, keyframe, joint, frame):
     # We have to build up drotmat one rotation value at a time so that
     # we get the matrix multiplication order correct.
     rotmat = np.array([[1., 0., 0., 0.], [0., 1., 0., 0.],
-                      [0., 0., 1., 0.], [0., 0., 0., 1.]])
+                       [0., 0., 1., 0.], [0., 0., 0., 1.]])
 
     counter = 0
 
@@ -249,7 +250,7 @@ def process_bvhkeyframe(worldpos, quaternion, keyframe, joint, frame):
             mycos = cos(theta)
             mysin = sin(theta)
             rotmat2 = np.array([[1., 0., 0., 0.], [0., 1., 0., 0.],
-                               [0., 0., 1., 0.], [0., 0., 0., 1.]])
+                                [0., 0., 1., 0.], [0., 0., 0., 1.]])
             rotmat2[1, 1] = mycos
             rotmat2[1, 2] = -mysin
             rotmat2[2, 1] = mysin
@@ -263,7 +264,7 @@ def process_bvhkeyframe(worldpos, quaternion, keyframe, joint, frame):
             mycos = cos(theta)
             mysin = sin(theta)
             rotmat2 = np.array([[1., 0., 0., 0.], [0., 1., 0., 0.],
-                               [0., 0., 1., 0.], [0., 0., 0., 1.]])
+                                [0., 0., 1., 0.], [0., 0., 0., 1.]])
             rotmat2[0, 0] = mycos
             rotmat2[0, 2] = mysin
             rotmat2[2, 0] = -mysin
@@ -277,7 +278,7 @@ def process_bvhkeyframe(worldpos, quaternion, keyframe, joint, frame):
             mycos = cos(theta)
             mysin = sin(theta)
             rotmat2 = np.array([[1., 0., 0., 0.], [0., 1., 0., 0.],
-                               [0., 0., 1., 0.], [0., 0., 0., 1.]])
+                                [0., 0., 1., 0.], [0., 0., 0., 1.]])
             rotmat2[0, 0] = mycos
             rotmat2[0, 1] = -mysin
             rotmat2[1, 0] = mysin
@@ -324,14 +325,15 @@ def process_bvhkeyframe(worldpos, quaternion, keyframe, joint, frame):
 
     if not joint.is_root:  # Not hips
         # parent_trtr = joint.parent.trtr[-1]  # Last entry from parent
-        parent_global_transform = joint.parent.global_transform[frame]  # Dictionary-based rewrite
+        parent_global_transform = joint.parent.global_transform  # Dictionary-based rewrite
         localtoworld = np.matmul(parent_global_transform, joint.transmat)
     else:  # Hips
         localtoworld = joint.transmat
 
-    joint.global_transform[frame] = np.matmul(localtoworld, rotmat)
+    joint.global_transform = np.matmul(localtoworld, rotmat)
 
     # worldpos[joint.name][time] = [localtoworld[0, 3], localtoworld[1, 3], localtoworld[2, 3]]
+
     worldpos[frame][joint.name] = [localtoworld[0, 3], localtoworld[1, 3], localtoworld[2, 3]]
 
     newkeyframe = keyframe[counter:]  # Slices from counter+1 to end
@@ -344,6 +346,46 @@ def process_bvhkeyframe(worldpos, quaternion, keyframe, joint, frame):
         #     print("Passing up fatal error in process_bvhkeyframe")
         #     return 0
     return newkeyframe
+
+
+def remove_joints(rig, joints_list):
+    for frame in rig.quaternion:
+        for joint in joints_list:
+            if joint in rig.quaternion[frame].keys():
+                del rig.quaternion[frame][joint]
+
+    for frame in rig.worldpos:
+        for joint in joints_list:
+            if joint in rig.worldpos[frame].keys():
+                del rig.worldpos[frame][joint]
+
+    # remove the node in the list except the root
+    def remove_node(node, remove_list):
+        for remove_joint in remove_list:
+            children_name = []
+            for child in node.children:
+                children_name.append(child.name)
+            if remove_joint in children_name:
+                temp_node = node.children.pop(children_name.index(remove_joint))
+                children_name.remove(remove_joint)
+                if not temp_node.is_end_site:
+                    node.children = node.children + temp_node.children
+                    for child in node.children:
+                        child.parent = node
+                if temp_node.is_end_site and node.is_end_site:
+                    new_node = Node()
+                    new_node.parent = node
+                    for f in rig.worldpos:
+                        if node.name in rig.worldpos[f].keys():
+                            new_name = node.name + 'End'
+                            rig.worldpos[f][new_name] = rig.worldpos[f][node.name]
+                            new_node.name = new_name  # TODO: Potentially, it can cause error
+                    node.children.append(new_node)
+
+        for child in node.children:
+            remove_node(child, joints_list)
+
+    remove_node(rig.root, joints_list)
 
 
 def data_store(rigs, filename='cmu_test.npz'):

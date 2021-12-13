@@ -18,7 +18,7 @@ class Node(object):
                                  [0., 0., 1., 0.], [0., 0., 0., 1.]])
 
         self.rot = {}  # self.rot[time] Rotation values at the frame.
-        self.global_transform = {}  # self.global_transmat[time]  A premultiplied series of transformation matrices.
+        self.global_transform = None  # temporarily store the global transmat
 
     @property
     def is_root(self):
