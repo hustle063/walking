@@ -22,7 +22,7 @@ class StateEncoder(nn.Module):
 
 
 class ControlEncoder(nn.Module):
-    def __init__(self, in_dim=7, hidden_dim=128, out_dim=64):
+    def __init__(self, in_dim=4, hidden_dim=32, out_dim=8):
         super(ControlEncoder, self).__init__()
         self.in_dim = in_dim
         self.hidden_dim = hidden_dim
@@ -80,18 +80,20 @@ class Decoder(nn.Module):
         self.out_dim = out_dim
 
         self.fc0 = nn.Linear(in_dim, hidden_dim, bias=True)
-        self.fc1 = nn.Linear(hidden_dim, out_dim, bias=True)
-        # self.fc1 = nn.Linear(hidden_dim, hidden_dim // 2, bias=True)
-        # self.fc2 = nn.Linear(hidden_dim // 2, out_dim - 2, bias=True)
-        # self.fc_conct = nn.Linear(hidden_dim // 2, 2, bias=True)
-        # self.ac_sig = nn.Sigmoid()
+        # self.fc1 = nn.Linear(hidden_dim, out_dim, bias=True)
+        self.fc1 = nn.Linear(hidden_dim, hidden_dim // 2, bias=True)
+        self.fc2 = nn.Linear(hidden_dim // 2, out_dim, bias=True)
+        self.fc3 = nn.Linear(hidden_dim // 2, 1, bias=True)
+        self.fc_conct = nn.Linear(hidden_dim // 2, 4, bias=True)
+        self.ac_sig = nn.Sigmoid()
 
     def forward(self, x):
         x = self.fc0(x)
         x = nn.functional.relu(x)
         x = self.fc1(x)
-        # x = nn.functional.relu(x)
-        # o1 = self.fc2(x)
-        # o2 = self.ac_sig(self.fc_conct(x))
-        # return o1, o2
-        return x
+        x = nn.functional.relu(x)
+        o1 = self.fc2(x)
+        o2 = self.ac_sig(self.fc_conct(x))
+        o3 = self.fc3(x)
+        return o1, o2, o3
+        # return x

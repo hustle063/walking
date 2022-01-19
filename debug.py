@@ -7,8 +7,8 @@ from tqdm import tqdm
 import numpy as np
 
 if __name__ == '__main__':
-    model = torch.load('trained_model/checkpoint10.t7')
-    file = 'edin_test_less.npz'
+    model = torch.load('E:/trained_model/checkpoint29_min_500.t7')
+    file = 'edin_test_less_30fps.npz'
     npzloader = NpzLoader(file, visualize=False)
     data = DataLoader(npzloader, batch_size=2, shuffle=True)
 
@@ -31,5 +31,5 @@ if __name__ == '__main__':
         for i in range(pos_pred.shape[0]):
             sample = {'trajectory': pos_pred[i], 'edges': npzloader.data['edges']}
             filename = 'walking_result/walk{}_{}.mp4'.format(i_batch, i)
-            render_animation(sample, filename, fps=120)
+            render_animation(sample, filename, fps=30)
 

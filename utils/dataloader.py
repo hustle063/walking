@@ -6,7 +6,7 @@ import scipy.ndimage.filters as filters
 
 
 class NpzLoader(Dataset):
-    def __init__(self, path, window=120, offset=-90, visualize=False):
+    def __init__(self, path, window=60, offset=-30, visualize=False):
         self.visualize = visualize
         self.x_std = 0
         self.data = self._load_npz(path, window, offset)
@@ -50,8 +50,8 @@ class NpzLoader(Dataset):
         return [lfoot_idx, rfoot_idx, ltoe_idx, rtoe_idx]
 
     def _find_facing_direction_joints(self, joints):
-        lshoulder_idx = self._get_joints_index(joints, 'LeftShoulder')
-        rshoulder_idx = self._get_joints_index(joints, 'RightShoulder')
+        lshoulder_idx = self._get_joints_index(joints, 'LeftArm')
+        rshoulder_idx = self._get_joints_index(joints, 'RightArm')
         hip_idx = self._get_joints_index(joints, 'Hips')
         return [lshoulder_idx, rshoulder_idx, hip_idx]
 
@@ -106,7 +106,7 @@ class NpzLoader(Dataset):
         xz_v = []
         for (worldpos, rotations, style, action, rig) in zip(data['worldpos'], data['rotations'], data['styles'],
                                                              data['actions'], data['skeletons']):
-            start_frame = 2  # We exclude the first frame which is a reference frame in CMU dataset
+            start_frame = 1  # We exclude the first frame which is a reference frame in CMU dataset
             joint_names = []
             self._find_joint_name(rig, joint_names)
             edges = [(-1, joint_names.index(rig.name))]
@@ -115,13 +115,13 @@ class NpzLoader(Dataset):
             # else:
             #     self._find_edges(rig, edges, joint_names)
             self._find_visual_edges(rig, edges, joint_names)
-            root_velocity = self._find_root_velocity(worldpos[1:, 0, :])
+            root_velocity = self._find_root_velocity(worldpos[:, 0, :])
             xz_velocity = np.sqrt(root_velocity[:, [0, 2]]**2).sum(axis=-1)
             foot_idx = self._find_foot_joints(joint_names)
             contact = self._extract_feet_contacts(worldpos[1:, :, :], foot_idx)
             contact = np.column_stack(contact)
             dir_idx = self._find_facing_direction_joints(joint_names)
-            facing_dir = self._find_facing_direction(dir_idx, worldpos[1:, :, :])
+            facing_dir = self._find_facing_direction(dir_idx, worldpos[:, :, :])
             rot_angle_diff = np.multiply(facing_dir[:, [0, 2]], root_velocity[:, [0, 2]]).sum(axis=-1) / xz_velocity
             # We think they are in same direction, if the root velocity = 0
             rot_angle_diff = np.nan_to_num(rot_angle_diff, nan=1.0)  
@@ -133,8 +133,8 @@ class NpzLoader(Dataset):
                 temp_P = worldpos[start_frame:end_frame, :, :]
                 temp_P[:, :, 0] = temp_P[:, :, 0] - temp_P[:, 0:1, 0]
                 temp_P[:, :, 2] = temp_P[:, :, 2] - temp_P[:, 0:1, 2]
-                temp_height = self._find_height(foot_idx, temp_P)
-                temp_P[:, :, 1] = temp_P[:, :, 1] - temp_height
+                # temp_height = self._find_height(foot_idx, temp_P)
+                # temp_P[:, :, 1] = temp_P[:, :, 1] - temp_height
                 P.append(np.reshape(temp_P, (window, -1)))
                 Q.append(np.reshape(rotations[start_frame:end_frame, :, :], (window, -1)))
                 actions.append(action)

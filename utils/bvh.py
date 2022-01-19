@@ -349,18 +349,10 @@ def process_bvhkeyframe(worldpos, quaternion, keyframe, joint, frame):
 
 
 def remove_joints(rig, joints_list):
-    for frame in rig.quaternion:
-        for joint in joints_list:
-            if joint in rig.quaternion[frame].keys():
-                del rig.quaternion[frame][joint]
-
-    for frame in rig.worldpos:
-        for joint in joints_list:
-            if joint in rig.worldpos[frame].keys():
-                del rig.worldpos[frame][joint]
 
     # remove the node in the list except the root
     def remove_node(node, remove_list):
+        new_remove_list = remove_list[:]
         for remove_joint in remove_list:
             children_name = []
             for child in node.children:
@@ -372,20 +364,26 @@ def remove_joints(rig, joints_list):
                     node.children = node.children + temp_node.children
                     for child in node.children:
                         child.parent = node
-                if temp_node.is_end_site and node.is_end_site:
-                    new_node = Node()
-                    new_node.parent = node
-                    for f in rig.worldpos:
-                        if node.name in rig.worldpos[f].keys():
-                            new_name = node.name + 'End'
-                            rig.worldpos[f][new_name] = rig.worldpos[f][node.name]
-                            new_node.name = new_name  # TODO: Potentially, it can cause error
-                    node.children.append(new_node)
+                if node.is_end_site:
+                    new_remove_list.append(node.name)
+                    node.name = node.name + 'End'
 
         for child in node.children:
-            remove_node(child, joints_list)
+            new_remove_list = remove_node(child, new_remove_list)
 
-    remove_node(rig.root, joints_list)
+        return new_remove_list
+
+    new_joints_list = remove_node(rig.root, joints_list)
+
+    for frame in rig.quaternion:
+        for joint in new_joints_list:
+            if joint in rig.quaternion[frame].keys():
+                del rig.quaternion[frame][joint]
+
+    for frame in rig.worldpos:
+        for joint in joints_list:
+            if joint in rig.worldpos[frame].keys():
+                del rig.worldpos[frame][joint]
 
 
 def data_store(rigs, filename='cmu_test.npz'):
