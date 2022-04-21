@@ -411,7 +411,7 @@ def data_store(rigs, filename='cmu_test.npz'):
         locomotion_pos.append(pos)
         locomotion_rot.append(q.qfix(rot))
         locomotion_styles.append('unknown')
-        locomotion_actions.append('walk')
+        locomotion_actions.append('walking')
         locomotion_skeletons.append(rig.root)
     output_file_path = filename
     np.savez_compressed(output_file_path,

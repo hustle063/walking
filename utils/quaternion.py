@@ -66,7 +66,7 @@ def qeuler(q, order, epsilon=0):
 
     original_shape = list(q.shape)
     original_shape[-1] = 3
-    q = q.view(-1, 4)
+    q = q.reshape(-1, 4)
 
     q0 = q[:, 0]
     q1 = q[:, 1]

@@ -10,10 +10,10 @@ if __name__ == '__main__':
     names = []
     remove_list = ['RightHandIndex1', 'RThumb', 'LeftHandIndex1', 'LThumb',
                    'RightHandIndex1End', 'RThumbEnd', 'LeftHandIndex1End', 'LThumbEnd']
-    for file in glob.glob("/Users/h1y1c/walking/dataset/edin_locomotion_valid/*.bvh", recursive=True):
+    for file in glob.glob("/Users/h1y1c/walking/dataset/h3.6m/predict_result/*.bvh", recursive=True):
         my_bvh = BvhReader(file)
         rig = my_bvh.read()
-        for i in range(0, rig.frames, 4):
+        for i in range(0, rig.frames, 2):
             new_frame = process_bvhkeyframe(rig.worldpos, rig.quaternion, rig.keyframes[i], rig.root, i)
         remove_joints(rig, remove_list)
         rig.worldpos.default_factory = None  # freeze rig.worldpos
@@ -30,6 +30,6 @@ if __name__ == '__main__':
         #     names.append(name)
 
         rigs.append(rig)
-    data_store(rigs, filename='edin_test_less_30fps.npz')
+    data_store(rigs, filename='h3.6m_predict.npz')
 
 
