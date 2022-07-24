@@ -106,7 +106,7 @@ def fkl(angles, parent, offset, rotInd, expmapInd):
             counter += 1
 
         # Fix the position error according to https://github.com/una-dinosauria/human-motion-prediction/issues/23
-        thisPosition = np.array([angles[1], angles[2], angles[0]])
+        thisPosition = np.array([angles[0], angles[1], angles[2]])
 
         if parent[i] == -1:  # Root node
             xyzStruct[i]['rotation'] = thisRotation
@@ -191,6 +191,37 @@ def _some_variables():
     return parent, offset, rotInd, expmapInd
 
 
+def _save_npz(data_set, root, filename):
+    parent, offset, rotInd, expmapInd = _some_variables()
+    xyz = {}
+    q = {}
+    locomotion_skeletons = []
+    locomotion_styles = []
+    locomotion_actions = []
+    locomotion_pos = []
+    locomotion_rot = []
+    for i in data_set:
+        nframes = data_set[i].shape[0]
+        xyz[i], q[i] = np.zeros((nframes, 32, 3)), np.zeros((nframes, 25, 4))
+        data_set[i] = revert_coordinate_space(data_set[i], np.eye(3), np.zeros(3))
+        for j in range(nframes):
+            # TODO first three element [0, 1, 2] should be swapped as [1, 2, 0]
+            xyz[i][j, :], q[i][j, :, :] = fkl(data_set[i][j, :], parent, offset, rotInd, expmapInd)
+        q[i] = qfix(q[i])
+        q[i][:, :, [0, 3, 2, 1]] = q[i][:, :, [0, 1, 2, 3]]
+        locomotion_skeletons.append(root)
+        locomotion_styles.append('unknown')
+        locomotion_actions.append('walking')
+        locomotion_pos.append(xyz[i])
+        locomotion_rot.append(q[i])
+    np.savez_compressed(filename,
+                        worldpos=locomotion_pos,
+                        rotations=locomotion_rot,
+                        styles=locomotion_styles,
+                        actions=locomotion_actions,
+                        skeletons=locomotion_skeletons)
+
+
 file = "./dataset/h3.6m/h36m_skeleton.bvh"
 my_bvh = BvhReader(file)
 with open(file, 'r') as my_bvh._file_handle:
@@ -199,35 +230,7 @@ with open(file, 'r') as my_bvh._file_handle:
 
 data_dir = './dataset/h3.6m/expmap'
 train_set, test_set = read_all_data(["walking"], data_dir, False)
-parent, offset, rotInd, expmapInd = _some_variables()
-xyz_train = {}
-q_train = {}
-locomotion_skeletons = []
-locomotion_styles = []
-locomotion_actions = []
-locomotion_pos = []
-locomotion_rot = []
-for i in train_set:
-  nframes_train = train_set[i].shape[0]
-  xyz_train[i], q_train[i] = np.zeros((nframes_train, 32, 3)), np.zeros((nframes_train, 25, 4))
-  train_set[i] = revert_coordinate_space(train_set[i], np.eye(3), np.zeros(3))
-  for j in range(nframes_train):
-    xyz_train[i][j, :], q_train[i][j, :, :] = fkl(train_set[i][j, :], parent, offset, rotInd, expmapInd)
-    # xyz_train[i][j, :] = fkl(train_set_copy[i][j, :], parent, offset, rotInd, expmapInd)[0]
-    # q_train[i][j, :, :] = fkl(train_set[i][j, :], parent, offset, rotInd, expmapInd)[1]
-  q_train[i] = qfix(q_train[i])
-  q_train[i][:,:,[0,3,2,1]] = q_train[i][:,:,[0,1,2,3]]
-  locomotion_skeletons.append(root)
-  locomotion_styles.append('unknown')
-  locomotion_actions.append('walking')
-  locomotion_pos.append(xyz_train[i])
-  locomotion_rot.append(q_train[i])
-file_name = 'h36m_train.npz'
-np.savez_compressed(file_name,
-                    worldpos=locomotion_pos,
-                    rotations=locomotion_rot,
-                    styles=locomotion_styles,
-                    actions=locomotion_actions,
-                    skeletons=locomotion_skeletons)
+# _save_npz(train_set, root, 'h36m_train.npz')
+_save_npz(test_set, root, 'h36m_test.npz')
 
 print('success')

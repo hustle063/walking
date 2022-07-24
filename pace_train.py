@@ -1,5 +1,5 @@
 from utils.dataloader import NpzLoader
-from models.model import PhysNetwork
+from models.pacemodel import PaceNetwork
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -10,8 +10,6 @@ if __name__ == '__main__':
     file_val = 'h36m_test.npz'
     npzloader_val = NpzLoader(file_val, window=26, offset=0, visualize=False)
     print('load complete')
-    physnet = PhysNetwork()
+    pacenet = PaceNetwork()
     writer = SummaryWriter('log')
-    physnet.train(npzloader_train, npzloader_val, 120, 8, writer)
-
-
+    pacenet.train(npzloader_train, npzloader_val, 500, 16, writer)

@@ -2,7 +2,7 @@
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import scipy.ndimage.filters as filters
-
+import copy
 
 class NpzLoader(Dataset):
     def __init__(self, path, window=60, offset=-30, visualize=False):
@@ -27,6 +27,7 @@ class NpzLoader(Dataset):
         for child in joint.children:
             self._find_joint_name(child, joint_names)
 
+
     def _find_root_velocity(self, rootpos):
         temppos = rootpos[:-1]
         temppos = np.insert(temppos, 0, rootpos[0], 0)
@@ -50,18 +51,18 @@ class NpzLoader(Dataset):
         return [lfoot_idx, rfoot_idx, ltoe_idx, rtoe_idx]
 
     def _find_facing_direction_joints(self, joints):
-        lshoulder_idx = self._get_joints_index(joints, 'LeftArm')
-        rshoulder_idx = self._get_joints_index(joints, 'RightArm')
-        hip_idx = self._get_joints_index(joints, 'Hips')
+        lshoulder_idx = self._get_joints_index(joints, 'LeftUpLeg')
+        rshoulder_idx = self._get_joints_index(joints, 'RightUpLeg')
+        hip_idx = self._get_joints_index(joints, 'Neck')
         return [lshoulder_idx, rshoulder_idx, hip_idx]
 
     def _find_facing_direction(self, dir_idx, worldpos):
         line1 = worldpos[:, dir_idx[0], :] - worldpos[:, dir_idx[2], :]
         line2 = worldpos[:, dir_idx[1], :] - worldpos[:, dir_idx[2], :]
-        forward = np.cross(line1, line2)
-        forward = forward / np.sqrt((forward ** 2).sum(axis=-1))[..., np.newaxis]
-        direction_filterwidth = 20
+        forward = np.cross(line2, line1)
+        direction_filterwidth = 10
         forward = filters.gaussian_filter1d(forward, direction_filterwidth, axis=0, mode='nearest')
+        forward = forward[:, [0, 2]] # We only consider the direction projected on xz-plane
         forward = forward / np.sqrt((forward ** 2).sum(axis=-1))[..., np.newaxis]
         return forward
 
@@ -107,6 +108,13 @@ class NpzLoader(Dataset):
         skeleton_scale = self.real_spine_length / skeleton_spine_length
         return skeleton_scale
 
+    def _find_xz_velocity(self, root_velocity):
+        direction_filterwidth = 10
+        xz_velocity = filters.gaussian_filter1d(root_velocity[:, [0, 2]], direction_filterwidth, axis=0, mode='nearest')
+        xz_scalar = np.sqrt((xz_velocity ** 2).sum(axis=-1))
+        unit_xz_velocity = xz_velocity / xz_scalar[..., np.newaxis]
+        return unit_xz_velocity, xz_scalar
+
     def _load_npz(self, path, window, offset):
         result = {}
         data = np.load(path, 'r', allow_pickle=True)
@@ -117,10 +125,10 @@ class NpzLoader(Dataset):
         actions = []
         styles = []
         rot_angle = []
-        rot_dir = []
         xz_v = []
-        y_v = []
         skeleton_scales = []
+        root_p = []
+        face_dir = []
         for (worldpos, rotations, style, action, rig) in zip(data['worldpos'], data['rotations'], data['styles'],
                                                              data['actions'], data['skeletons']):
             start_frame = 1  # We exclude the first frame which is a reference frame in CMU dataset
@@ -135,22 +143,20 @@ class NpzLoader(Dataset):
             self._find_visual_edges(rig, edges, joint_names)
             skeleton_scale = self._find_skeleton_scale(worldpos[0, :, :], joint_names)
             root_velocity = self._find_root_velocity(worldpos[:, 0, :])
-            xz_velocity = np.sqrt((root_velocity[:, [0, 2]] ** 2).sum(axis=-1))
             y_velocity = root_velocity[:, 1]
             foot_idx = self._find_foot_joints(joint_names)
             contact = self._extract_feet_contacts(worldpos[1:, :, :], foot_idx)
             contact = np.column_stack(contact)
             dir_idx = self._find_facing_direction_joints(joint_names)
             facing_dir = self._find_facing_direction(dir_idx, worldpos[:, :, :])
-            rot_angle_diff = np.multiply(facing_dir[:, [0, 2]], root_velocity[:, [0, 2]]).sum(axis=-1) / xz_velocity
-            # We think they are in same direction, if the root velocity = 0
-            rot_angle_diff = np.nan_to_num(rot_angle_diff, nan=1.0)
-            rot_diff_dir = np.cross(facing_dir[:, [0, 2]], root_velocity[:, [0, 2]])
-            rot_diff_dir = rot_diff_dir >= 0  # True: left, False: right. We treat same direction as left
+            unit_xz_velocity, xz_velocity = self._find_xz_velocity(root_velocity)
+            rot_angle_sin = np.cross(facing_dir, unit_xz_velocity)
+            rot_angle_cos = np.multiply(facing_dir, unit_xz_velocity).sum(-1)
             end_frame = start_frame + window
             while end_frame < worldpos.shape[0]:
                 # remove bias in x and z direction
-                temp_P = worldpos[start_frame:end_frame, :, :]
+                temp_P = copy.deepcopy(worldpos[start_frame:end_frame, :, :])
+                root_pos = copy.deepcopy(temp_P[:, 0, :])
                 temp_P[:, :, 0] = temp_P[:, :, 0] - temp_P[:, 0:1, 0]
                 temp_P[:, :, 1] = temp_P[:, :, 1] - temp_P[:, 0:1, 1]
                 temp_P[:, :, 2] = temp_P[:, :, 2] - temp_P[:, 0:1, 2]
@@ -161,11 +167,13 @@ class NpzLoader(Dataset):
                 actions.append(action)
                 styles.append(style)
                 skeleton_scales.append(skeleton_scale)
-                root_v.append(root_velocity[start_frame:end_frame])
+                # root_v.append(root_velocity[start_frame:end_frame])
+                root_v.append(unit_xz_velocity[start_frame:end_frame])
+                root_p.append(root_pos)
+                face_dir.append(facing_dir[start_frame:end_frame])
                 xz_v.append(xz_velocity[start_frame:end_frame])
-                y_v.append(y_velocity[start_frame:end_frame])
-                rot_dir.append(rot_diff_dir[start_frame:end_frame])
-                rot_angle.append(rot_angle_diff[start_frame:end_frame])
+                rot_angle.append(np.stack((rot_angle_sin[start_frame:end_frame], rot_angle_cos[start_frame:end_frame]),
+                                          axis=-1))
                 contact_state.append(contact[start_frame - 1:end_frame - 1, :])
                 start_frame = end_frame + offset
                 end_frame = start_frame + window
@@ -177,13 +185,13 @@ class NpzLoader(Dataset):
             'rotations': Q,
             'trajectory': P,
             'root_velocity': root_v,
+            'root_position': root_p,
             'delta_rotation_angle': rot_angle,
-            'rotation_direction': rot_dir,
             'xz_plane_velocity': xz_v,
-            'y_axis_velocity': y_v,
             'contact_state': contact_state,
             'rig': rig,
             'edges': edges,
+            'facing_direction': face_dir,
         }
         return result
 
@@ -194,12 +202,12 @@ class NpzLoader(Dataset):
         sample = {
             'local_q': self.data['rotations'][idx].astype(np.float32),
             'root_v': self.data['root_velocity'][idx].astype(np.float32),
+            'root_p': self.data['root_position'][idx].astype(np.float32),
             'contact': self.data['contact_state'][idx].astype(np.float32),
             'worldpos': self.data['trajectory'][idx].astype(np.float32),
             'rot_angle': self.data['delta_rotation_angle'][idx].astype(np.float32),
-            'rot_dir': self.data['rotation_direction'][idx].astype(np.float32),
             'xz_v': self.data['xz_plane_velocity'][idx].astype(np.float32),
-            'y_v': self.data['y_axis_velocity'][idx].astype(np.float32),
-            'scale': self.data['scales'][idx].astype(np.float32)
+            'scale': self.data['scales'][idx].astype(np.float32),
+            'face_dir': self.data['facing_direction'][idx].astype(np.float32)
         }
         return sample
