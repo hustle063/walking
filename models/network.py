@@ -108,16 +108,18 @@ class Decoder(nn.Module):
         self.out_dim = out_dim
 
         self.fc0 = nn.Linear(in_dim, hidden_dim, bias=True)
+        self.fc0_bn = nn.BatchNorm1d(hidden_dim)
         # self.fc1 = nn.Linear(hidden_dim, out_dim, bias=True)
         self.fc1 = nn.Linear(hidden_dim, hidden_dim // 2, bias=True)
+        self.fc1_bn = nn.BatchNorm1d(hidden_dim // 2)
         self.fc2 = nn.Linear(hidden_dim // 2, out_dim, bias=True)
         self.fc3 = nn.Linear(hidden_dim // 2, 1, bias=True)
         self.fc4 = nn.Linear(hidden_dim // 2, 1, bias=True)
 
     def forward(self, x):
-        x = self.fc0(x)
+        x = self.fc0_bn(self.fc0(x))
         x = nn.functional.elu(x)
-        x = self.fc1(x)
+        x = self.fc1_bn(self.fc1(x))
         x = nn.functional.elu(x)
         o1 = self.fc2(x)
         o2 = self.fc3(x)
@@ -127,16 +129,19 @@ class Decoder(nn.Module):
 
 
 class PaceDecoder(nn.Module):
-    def __init__(self, in_dim=32):
+    def __init__(self, in_dim=32, out_dim=2):
         super(PaceDecoder, self).__init__()
         self.in_dim = in_dim
+        self.out_dim = out_dim
         self.fc0 = nn.Linear(in_dim, in_dim//4, bias=True)
-        self.fc1 = nn.Linear(in_dim//4, 2, bias=True)
+        self.fc1 = nn.Linear(in_dim//4, out_dim, bias=True)
 
     def forward(self, x):
+        identity = x[:, :, -self.out_dim:]
         x = self.fc0(x)
         x = nn.functional.elu(x)
         x = self.fc1(x)
+        x += identity
         x = nn.functional.normalize(x, dim=2)
         return x
 
@@ -147,11 +152,13 @@ class PaceBlock(nn.Module):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.fc0 = nn.Linear(in_dim, 64, bias=True)
+        self.layer_norm = nn.LayerNorm(64)
         self.gru = GRUModel1(64, h_size=out_dim)
 
     def forward(self, x, hidden):
         x = self.fc0(x)
         x = nn.functional.elu(x)
+        x = self.layer_norm(x)
         x, hidden = self.gru(x, hidden)
         return x, hidden
 

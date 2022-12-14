@@ -9,6 +9,9 @@ import numpy as np
 from six.moves import xrange # pylint: disable=redefined-builtin
 import copy
 
+import glob
+from utils.bvh import BvhReader, process_bvhkeyframe, data_store, remove_joints
+
 def rotmat2euler( R ):
   """
   Converts a rotation matrix to Euler angles
@@ -245,6 +248,8 @@ def load_data(path_to_dataset, subjects, actions, one_hot):
         action_sequence = readCSVasFloat(filename)
 
         n, d = action_sequence.shape
+        root_p = load_bvh(subj, 'walking', n)
+        action_sequence[:, 0:3] = root_p
         even_list = range(0, n, 2)
 
         if one_hot:
@@ -324,5 +329,42 @@ def normalization_stats(completeData):
   data_std[dimensions_to_ignore] = 1.0
 
   return data_mean, data_std, dimensions_to_ignore, dimensions_to_use
+
+
+def load_bvh(subjects, actions, length, path_to_dataset="/Users/yuchhuang9/human-motion-prediction-pytorch/data/"):
+  root_pos = []
+  find_match = [False, 0]
+  for file in glob.glob(path_to_dataset + "h3.6m/walking/S{0}_{1}_*.bvh".format(subjects, actions), recursive=True):
+    my_bvh = BvhReader(file)
+    rig = my_bvh.read()
+    if rig.frames == length:
+      if find_match[1] == 0:
+        find_match = [True, 1]
+      else:
+        find_match[0] = False
+        find_match[1] += 1
+      for i in range(0, rig.frames):
+        counter = 0
+        for channel in rig.root.channels:
+          keyval = rig.keyframes[i][counter]
+          if channel == "Xposition":
+            xpos = keyval
+          elif channel == "Yposition":
+            ypos = keyval
+          elif channel == "Zposition":
+            zpos = keyval
+          else:
+            continue
+          counter += 1
+        root_pos.append([xpos, ypos, zpos])
+  if find_match[0]:
+    root_pos = np.array(root_pos)
+    root_init = root_pos[0, 0:3]
+    root_pos = root_pos - root_init[None, :]
+    return root_pos
+  elif find_match[1]:
+    raise Exception('Cannot decide the matching')
+  else:
+    raise Exception('Match not found')
 
 

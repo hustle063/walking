@@ -62,7 +62,7 @@ class NpzLoader(Dataset):
         forward = np.cross(line2, line1)
         direction_filterwidth = 10
         forward = filters.gaussian_filter1d(forward, direction_filterwidth, axis=0, mode='nearest')
-        forward = forward[:, [0, 2]] # We only consider the direction projected on xz-plane
+        forward = forward[:, [0, 1]] # We only consider the direction projected on xz-plane
         forward = forward / np.sqrt((forward ** 2).sum(axis=-1))[..., np.newaxis]
         return forward
 
@@ -109,8 +109,8 @@ class NpzLoader(Dataset):
         return skeleton_scale
 
     def _find_xz_velocity(self, root_velocity):
-        direction_filterwidth = 10
-        xz_velocity = filters.gaussian_filter1d(root_velocity[:, [0, 2]], direction_filterwidth, axis=0, mode='nearest')
+        sigma = 10
+        xz_velocity = filters.gaussian_filter1d(root_velocity[:, [0, 1]], sigma, axis=0, mode='nearest')
         xz_scalar = np.sqrt((xz_velocity ** 2).sum(axis=-1))
         unit_xz_velocity = xz_velocity / xz_scalar[..., np.newaxis]
         return unit_xz_velocity, xz_scalar
@@ -120,6 +120,7 @@ class NpzLoader(Dataset):
         data = np.load(path, 'r', allow_pickle=True)
         P = []
         Q = []
+        V = []
         root_v = []
         contact_state = []
         actions = []
@@ -153,16 +154,17 @@ class NpzLoader(Dataset):
             rot_angle_sin = np.cross(facing_dir, unit_xz_velocity)
             rot_angle_cos = np.multiply(facing_dir, unit_xz_velocity).sum(-1)
             end_frame = start_frame + window
-            while end_frame < worldpos.shape[0]:
+            while end_frame < worldpos.shape[0] - 1:
                 # remove bias in x and z direction
-                temp_P = copy.deepcopy(worldpos[start_frame:end_frame, :, :])
+                temp_P = copy.deepcopy(worldpos[start_frame:end_frame+1, :, :])
                 root_pos = copy.deepcopy(temp_P[:, 0, :])
                 temp_P[:, :, 0] = temp_P[:, :, 0] - temp_P[:, 0:1, 0]
                 temp_P[:, :, 1] = temp_P[:, :, 1] - temp_P[:, 0:1, 1]
                 temp_P[:, :, 2] = temp_P[:, :, 2] - temp_P[:, 0:1, 2]
                 # temp_height = self._find_height(foot_idx, temp_P)
                 # temp_P[:, :, 1] = temp_P[:, :, 1] - temp_height
-                P.append(np.reshape(temp_P, (window, -1)))
+                P.append(np.reshape(temp_P[:-1], (window, -1)))
+                V.append(np.reshape(temp_P[1:], (window, -1)) - np.reshape(temp_P[:-1], (window, -1)))
                 Q.append(np.reshape(rotations[start_frame:end_frame, :, :], (window, -1)))
                 actions.append(action)
                 styles.append(style)
@@ -184,6 +186,7 @@ class NpzLoader(Dataset):
             'scales': skeleton_scales,
             'rotations': Q,
             'trajectory': P,
+            'joint_velocity': V,
             'root_velocity': root_v,
             'root_position': root_p,
             'delta_rotation_angle': rot_angle,
@@ -203,6 +206,7 @@ class NpzLoader(Dataset):
             'local_q': self.data['rotations'][idx].astype(np.float32),
             'root_v': self.data['root_velocity'][idx].astype(np.float32),
             'root_p': self.data['root_position'][idx].astype(np.float32),
+            'joint_v': self.data['joint_velocity'][idx].astype(np.float32),
             'contact': self.data['contact_state'][idx].astype(np.float32),
             'worldpos': self.data['trajectory'][idx].astype(np.float32),
             'rot_angle': self.data['delta_rotation_angle'][idx].astype(np.float32),

@@ -222,15 +222,15 @@ def _save_npz(data_set, root, filename):
                         skeletons=locomotion_skeletons)
 
 
-file = "./dataset/h3.6m/h36m_skeleton.bvh"
+file = "./dataset/h36m_skeleton.bvh"
 my_bvh = BvhReader(file)
 with open(file, 'r') as my_bvh._file_handle:
   my_bvh.read_hierarchy()
   root = my_bvh.root
 
-data_dir = './dataset/h3.6m/expmap'
+data_dir = './dataset/expmap'
 train_set, test_set = read_all_data(["walking"], data_dir, False)
-# _save_npz(train_set, root, 'h36m_train.npz')
-_save_npz(test_set, root, 'h36m_test.npz')
+_save_npz(train_set, root, 'h36m_train_new.npz')
+_save_npz(test_set, root, 'h36m_test_new.npz')
 
 print('success')
