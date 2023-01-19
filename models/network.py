@@ -135,15 +135,17 @@ class PaceDecoder(nn.Module):
         self.out_dim = out_dim
         self.fc0 = nn.Linear(in_dim, in_dim//4, bias=True)
         self.fc1 = nn.Linear(in_dim//4, out_dim, bias=True)
+        self.fc2 = nn.Linear(in_dim//4, 1, bias=True)
 
     def forward(self, x):
         identity = x[:, :, -self.out_dim:]
         x = self.fc0(x)
         x = nn.functional.elu(x)
-        x = self.fc1(x)
-        x += identity
-        x = nn.functional.normalize(x, dim=2)
-        return x
+        x1 = self.fc1(x)
+        x2 = self.fc2(x)
+        x1 += identity
+        x1 = nn.functional.normalize(x1, dim=2)
+        return x1, x2
 
 
 class PaceBlock(nn.Module):

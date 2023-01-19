@@ -96,7 +96,7 @@ class PaceNetwork:
         x_rightarm, self.h_rightarm = self.rightarm_layer(torch.cat([rightarm_pos], -1).unsqueeze(0), self.h_rightarm)
         state_input = torch.cat([rot_angle_t], -1).unsqueeze(0)
         h_out = torch.cat([x_leftleg, x_rightleg, x_torso, x_leftarm, x_rightarm, state_input], -1)
-        self.rot_angle_pred = self.decoder(h_out)
+        self.rot_angle_pred, self.xz_v_pred = self.decoder(h_out)
 
     def train(self, npzloader_train, npzloader_val, n_epoch, batch_num, writer, window=25):
         torch.autograd.set_detect_anomaly(True)
@@ -158,7 +158,8 @@ class PaceNetwork:
                     xz_dir_gt = torch.cat([dir_column3, dir_column4], 1)
                     xz_v_next = self.xz_v[:, t + 1:t + 2].squeeze(-1) / self.skeleton_scale
                     xz_v = xz_v_next.view(-1, 1).expand_as(xz_dir_pred)
-                    distance_pred = xz_v * xz_dir_pred
+                    xz_v_pred = self.xz_v_pred.view(-1, 1).expand_as(xz_dir_pred)
+                    distance_pred = xz_v_pred * xz_dir_pred
                     distance_gt = xz_v * xz_dir_gt
                     # distance_gt = distance_gt * self.skeleton_scale.view(-1, 1).expand_as(distance_pred)
                     loss_distance += loss_L2(distance_pred[:, :], distance_gt)
@@ -210,7 +211,7 @@ class PaceNetwork:
                 print(self.rot_angle_pred[0, :, 0].clone().detach().cpu().numpy(), sin_angle)
             if epoch % 1 == 0:
                 self.validation(npzloader_val, data, epoch, writer)
-        self.save_model('C:/Users/yuchhuang9/walking/trained_model/h36m_pace_28_final.t7', epoch)
+        self.save_model('C:/Users/yuchhuang9/walking/trained_model/h36m_pace_33_final.t7', epoch)
 
     def validation(self, npzloader, data_train, epoch, writer, window=25):
         notsave = True
@@ -281,8 +282,10 @@ class PaceNetwork:
         self.leftarm_layer.load_state_dict(model['leftarm_layer'])
         self.rightarm_layer.load_state_dict(model['rightarm_layer'])
         self.decoder.load_state_dict(model['decoder'])
-        rig_pred = {}
-        errors = []
+        FDEs = []
+        ADEs = []
+        preds = []
+        gts = []
         # self.state_encoder.eval()
         # self.control_encoder.eval()
         self.leftleg_layer.eval()
@@ -292,10 +295,9 @@ class PaceNetwork:
         self.rightarm_layer.eval()
         self.decoder.eval()
         for i_batch, sampled_batch in tqdm(enumerate(data)):
-            rig_pred[i_batch] = {'root_pos': [], 'q': []}
             batch_size = self.read_data(sampled_batch)
-            traj_point = self.root_p[:, 0, [0, 1]]
-            traj_point1 = self.root_p[:, 0, [0, 1]]
+            traj_point = self.root_p[:, window-26, [0, 1]]
+            traj_point1 = self.root_p[:, window-26, [0, 1]]
             euler_pred_seq = np.zeros((batch_size, window - 1, 78))
             self.hidden = None
             ground_truth = []
@@ -304,11 +306,11 @@ class PaceNetwork:
             ADE = 0
 
             for t in range(window - 1):  # window length
-                if t < 50:
+                if t < window-25:
                     self.forward(t, easy_state=True)
                 else:
                     self.forward(t, easy_state=False)
-                sample = 1
+                sample = 0
                 sin_angle_pred = self.rot_angle_pred[0, :, 0]
                 cos_angle_pred = self.rot_angle_pred[0, :, 1]
                 sin_angle = self.rot_angle[:, t+1, 0]
@@ -318,31 +320,32 @@ class PaceNetwork:
 
                 face_dir = torch.clone(self.face_dir[:, t + 1, :]).unsqueeze(-1)
                 xz_dir = torch.bmm(torch.movedim(rot, 2, 0), face_dir).squeeze(-1)
-                # xz_v_next = self.xz_v[:, t + 1:t + 2].squeeze(-1) / self.skeleton_scale
-                xz_v_next = self.xz_v[:, t + 1:t + 2].squeeze(-1)
+                xz_v_next = self.xz_v[:, t + 1:t + 2].squeeze(-1) / self.skeleton_scale
+                # xz_v_next = self.xz_v[:, t + 1:t + 2].squeeze(-1)
                 xz_v = xz_v_next.view(-1, 1).expand_as(xz_dir)
                 distance = xz_v * xz_dir
-                traj_point1 = distance + traj_point1
+                if t >= window-26:
+                    traj_point1 = distance + traj_point1
 
                 rot_pred = torch.stack([torch.stack([cos_angle_pred, -sin_angle_pred]),
                                         torch.stack([sin_angle_pred, cos_angle_pred])])
                 xz_dir = torch.bmm(torch.movedim(rot_pred, 2, 0), face_dir).squeeze(-1)
-                # xz_v_next = self.xz_v[:, t + 1:t + 2].squeeze(-1) / self.skeleton_scale
-                xz_v_next = self.xz_v[:, t + 1:t + 2].squeeze(-1)
-                xz_v_pred = xz_v_next.view(-1, 1).expand_as(xz_dir)
-                distance = xz_v_pred * xz_dir
-                traj_point = distance + traj_point
-                if t >= 50:
+                xz_v_next = self.xz_v[:, t + 1:t + 2].squeeze(-1) / self.skeleton_scale
+                # xz_v_next = self.xz_v[:, t + 1:t + 2].squeeze(-1)
+                xz_v_pred = self.xz_v_pred.view(-1, 1).expand_as(xz_dir)
+                distance_pred = xz_v_pred * xz_dir
+                if t >= window-26:
+                    traj_point = distance_pred + traj_point
                     error = torch.sqrt(torch.sum(torch.pow(traj_point1 - traj_point, 2), 1))
                     error = torch.mean(error)
                     ADE += error
-                    if t == 73:
+                    if t == window-2:
                         FDE = error
 
 
 
-                predicted.append(traj_point[sample, :].clone().detach().cpu().numpy())
-                ground_truth.append(traj_point1[sample, :].clone().detach().cpu().numpy())
+                    predicted.append(traj_point[sample, :].clone().detach().cpu().numpy())
+                    ground_truth.append(traj_point1[sample, :].clone().detach().cpu().numpy())
 
                 #ground_truth.append(self.root_p[sample, t + 1, [0, 2]].clone().cpu().numpy())
 
@@ -366,12 +369,18 @@ class PaceNetwork:
                 # print(cos_angle_pred.clone().detach().cpu().numpy(), self.rot_angle[:, t + 1, 1])
                 # print(sin_angle_pred.clone().detach().cpu().numpy(), self.rot_angle[:, t + 1, 0])
                 # errors.append(mean_errors)
-            ADE = ADE / 24
-            print(FDE*50, ADE*50)
+            ADE = ADE / 25
+            FDEs.append(FDE.clone().detach().cpu().numpy())
+            ADEs.append(ADE.clone().detach().cpu().numpy())
 
-            predicted.insert(0, self.root_p[sample, 0, [0, 1]].clone().cpu().numpy())
-            ground_truth.insert(0, self.root_p[sample, 0, [0, 1]].clone().cpu().numpy())
+            # predicted.insert(0, self.root_p[sample, 0, [0, 1]].clone().cpu().numpy())
+            # ground_truth.insert(0, self.root_p[sample, 0, [0, 1]].clone().cpu().numpy())
             pred = np.array(predicted)
             gt = np.array(ground_truth)
-            plt.plot(pred[:window-1, 0], pred[:window-1, 1], gt[:window-1, 0], gt[:window-1, 1])
+            preds.append(pred)
+            gts.append(gt)
+            plt.plot(gt[:, 0], gt[:, 1], '-gv', pred[:, 0], pred[:, 1], '-rv')
+            plt.plot(gt[0, 0], gt[0, 1], "gs", pred[0, 0], pred[0, 1], 'rs')
             plt.show()
+        print(np.mean(np.array(ADEs)), np.mean(np.array(FDEs)))
+        np.savez('ours_result.npz', pred=preds, gt=gts)

@@ -8,14 +8,14 @@ from utils.bvh import BvhReader, process_bvhkeyframe, data_store, remove_joints
 if __name__ == '__main__':
     rigs = []
     names = []
-    remove_list = ['RightHandIndex1', 'RThumb', 'LeftHandIndex1', 'LThumb',
-                   'RightHandIndex1End', 'RThumbEnd', 'LeftHandIndex1End', 'LThumbEnd']
-    for file in glob.glob("/Users/h1y1c/walking/dataset/h3.6m/predict_result/*.bvh", recursive=True):
+    # remove_list = ['RightHandIndex1', 'RThumb', 'LeftHandIndex1', 'LThumb',
+    #                'RightHandIndex1End', 'RThumbEnd', 'LeftHandIndex1End', 'LThumbEnd']
+    for file in glob.glob("/Users/yuchhuang9/walking/dataset/h36m_test/*.bvh", recursive=True):
         my_bvh = BvhReader(file)
         rig = my_bvh.read()
         for i in range(0, rig.frames, 2):
             new_frame = process_bvhkeyframe(rig.worldpos, rig.quaternion, rig.keyframes[i], rig.root, i)
-        remove_joints(rig, remove_list)
+        # remove_joints(rig, remove_list)
         rig.worldpos.default_factory = None  # freeze rig.worldpos
         rig.quaternion.default_factory = None  # freeze rig.quaternion
 
@@ -30,6 +30,6 @@ if __name__ == '__main__':
         #     names.append(name)
 
         rigs.append(rig)
-    data_store(rigs, filename='h3.6m_predict.npz')
+    data_store(rigs, filename='h36m_test_new.npz')
 
 

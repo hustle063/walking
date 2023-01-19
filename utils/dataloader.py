@@ -5,11 +5,14 @@ import scipy.ndimage.filters as filters
 import copy
 
 class NpzLoader(Dataset):
-    def __init__(self, path, window=60, offset=-30, visualize=False):
+    def __init__(self, path, window=60, offset=-30, visualize=False, srnn=False):
         self.visualize = visualize
         self.real_spine_length = 0.402  # unit in meter DOI:10.1186/1756-0500-6-58
         self.x_std = 0
-        self.data = self._load_npz(path, window, offset)
+        if srnn:
+            self.data = self._load_npz_srnn(path)
+        else:
+            self.data = self._load_npz(path, window, offset)
 
     def _find_edges(self, joint, edges, joint_names):
         for child in joint.children:
@@ -109,11 +112,12 @@ class NpzLoader(Dataset):
         return skeleton_scale
 
     def _find_xz_velocity(self, root_velocity):
-        sigma = 10
-        xz_velocity = filters.gaussian_filter1d(root_velocity[:, [0, 1]], sigma, axis=0, mode='nearest')
+        # sigma = 10
+        # xz_velocity = filters.gaussian_filter1d(root_velocity[:, [0, 1]], sigma, axis=0, mode='nearest')
+        xz_velocity = root_velocity[:, [0, 1]]
         xz_scalar = np.sqrt((xz_velocity ** 2).sum(axis=-1))
         unit_xz_velocity = xz_velocity / xz_scalar[..., np.newaxis]
-        return unit_xz_velocity, xz_scalar
+        return np.nan_to_num(unit_xz_velocity), xz_scalar
 
     def _load_npz(self, path, window, offset):
         result = {}
@@ -197,6 +201,119 @@ class NpzLoader(Dataset):
             'facing_direction': face_dir,
         }
         return result
+
+    def _find_indices_srnn(self, data):
+        """
+        Find the same action indices as in SRNN.
+        See https://github.com/asheshjain399/RNNexp/blob/master/structural_rnn/CRFProblems/H3.6m/processdata.py#L325
+        """
+
+        # Used a fixed dummy seed, following
+        # https://github.com/asheshjain399/RNNexp/blob/srnn/structural_rnn/forecastTrajectories.py#L29
+        SEED = 1234567890
+        rng = np.random.RandomState(SEED)
+
+        subject = 5
+        subaction1 = 1
+        subaction2 = 2
+
+        T1 = data['rotations'][1].shape[0]
+        T2 = data['rotations'][0].shape[0]
+        prefix, suffix = 50, 100
+
+        idx = []
+        idx.append(rng.randint(16, T1 - prefix - suffix))
+        idx.append(rng.randint(16, T2 - prefix - suffix))
+        idx.append(rng.randint(16, T1 - prefix - suffix))
+        idx.append(rng.randint(16, T2 - prefix - suffix))
+        idx.append(rng.randint(16, T1 - prefix - suffix))
+        idx.append(rng.randint(16, T2 - prefix - suffix))
+        idx.append(rng.randint(16, T1 - prefix - suffix))
+        idx.append(rng.randint(16, T2 - prefix - suffix))
+        return idx
+
+    def _load_npz_srnn(self, path):
+        window = 75
+        data = np.load(path, 'r', allow_pickle=True)
+        idx = self._find_indices_srnn(data)
+        P = []
+        Q = []
+        V = []
+        root_v = []
+        contact_state = []
+        actions = []
+        styles = []
+        rot_angle = []
+        xz_v = []
+        skeleton_scales = []
+        root_p = []
+        face_dir = []
+        count = 0
+        for (worldpos, rotations, style, action, rig) in zip(data['worldpos'], data['rotations'], data['styles'],
+                                                             data['actions'], data['skeletons']):
+            joint_names = []
+            self._find_joint_name(rig, joint_names)
+            edges = [(-1, joint_names.index(rig.name))]
+            # if self.visualize:
+            #     self._find_visual_edges(rig, edges, joint_names)
+            # else:
+            #     self._find_edges(rig, edges, joint_names)
+            # self._find_visual_edges(rig, edges, joint_names)
+            self._find_visual_edges(rig, edges, joint_names)
+            skeleton_scale = self._find_skeleton_scale(worldpos[0, :, :], joint_names)
+            root_velocity = self._find_root_velocity(worldpos[:, 0, :])
+            y_velocity = root_velocity[:, 1]
+            foot_idx = self._find_foot_joints(joint_names)
+            contact = self._extract_feet_contacts(worldpos[1:, :, :], foot_idx)
+            contact = np.column_stack(contact)
+            dir_idx = self._find_facing_direction_joints(joint_names)
+            facing_dir = self._find_facing_direction(dir_idx, worldpos[:, :, :])
+            unit_xz_velocity, xz_velocity = self._find_xz_velocity(root_velocity)
+            rot_angle_sin = np.cross(facing_dir, unit_xz_velocity)
+            rot_angle_cos = np.multiply(facing_dir, unit_xz_velocity).sum(-1)
+            for start_frame in idx[(count+1)%2::len(data['worldpos'])]:
+                end_frame = start_frame + window
+                temp_P = copy.deepcopy(worldpos[start_frame:end_frame + 1, :, :])
+                root_pos = copy.deepcopy(temp_P[:, 0, :])
+                temp_P[:, :, 0] = temp_P[:, :, 0] - temp_P[:, 0:1, 0]
+                temp_P[:, :, 1] = temp_P[:, :, 1] - temp_P[:, 0:1, 1]
+                temp_P[:, :, 2] = temp_P[:, :, 2] - temp_P[:, 0:1, 2]
+                # temp_height = self._find_height(foot_idx, temp_P)
+                # temp_P[:, :, 1] = temp_P[:, :, 1] - temp_height
+                P.append(np.reshape(temp_P[:-1], (window, -1)))
+                V.append(np.reshape(temp_P[1:], (window, -1)) - np.reshape(temp_P[:-1], (window, -1)))
+                Q.append(np.reshape(rotations[start_frame:end_frame, :, :], (window, -1)))
+                actions.append(action)
+                styles.append(style)
+                skeleton_scales.append(skeleton_scale)
+                # root_v.append(root_velocity[start_frame:end_frame])
+                root_v.append(unit_xz_velocity[start_frame:end_frame])
+                root_p.append(root_pos)
+                face_dir.append(facing_dir[start_frame:end_frame])
+                xz_v.append(xz_velocity[start_frame:end_frame])
+                rot_angle.append(np.stack((rot_angle_sin[start_frame:end_frame], rot_angle_cos[start_frame:end_frame]),
+                                          axis=-1))
+                contact_state.append(contact[start_frame - 1:end_frame - 1, :])
+            count += 1
+
+        result = {
+            'actions': action,
+            'styles': style,
+            'scales': skeleton_scales,
+            'rotations': Q,
+            'trajectory': P,
+            'joint_velocity': V,
+            'root_velocity': root_v,
+            'root_position': root_p,
+            'delta_rotation_angle': rot_angle,
+            'xz_plane_velocity': xz_v,
+            'contact_state': contact_state,
+            'rig': rig,
+            'edges': edges,
+            'facing_direction': face_dir,
+        }
+        return result
+
 
     def __len__(self):
         return len(self.data['rotations'])
